@@ -43,16 +43,17 @@ textarea{min-height:92px;resize:vertical}
 .fonts .chip{border-radius:12px;font-size:19px;padding:10px;text-align:center}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 canvas{display:block;width:100%;max-height:420px;object-fit:contain;background:#000;border-radius:14px;margin-bottom:6px}
-.dots{display:flex;gap:10px}
+.dots{display:flex;flex-wrap:wrap;gap:10px}
 .dot{width:32px;height:32px;border-radius:50%;border:3px solid var(--card);box-shadow:0 0 0 1px var(--line);cursor:pointer}
 .dot[aria-pressed="true"]{box-shadow:0 0 0 3px var(--acc)}
 .go{width:100%;border:0;border-radius:16px;background:var(--acc);color:var(--accink);font:800 17px Manrope,sans-serif;padding:16px;cursor:pointer}
 .go:disabled{opacity:.5;cursor:not-allowed}
-.msg{margin:10px 0 0;font-size:14px;color:var(--warn)}
+.msg{margin:0 0 12px;padding:12px;border-radius:12px;background:var(--soft);font-size:15px;font-weight:600;color:var(--warn)}
 .res{background:var(--soft);border-radius:14px;padding:14px;margin-top:14px;font-size:14px}
 .res video{width:100%;border-radius:10px;margin:8px 0}
 .res a{display:block;text-align:center;background:var(--acc);color:var(--accink);text-decoration:none;font-weight:800;border-radius:12px;padding:12px}
 .hint{color:var(--mute);font-size:13px;margin:6px 0 0}
+.dots input[type=color]{width:32px;height:32px;padding:0;border:0;border-radius:50%;background:none;cursor:pointer}
 #vid{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -94,6 +95,9 @@ canvas{display:block;width:100%;max-height:420px;object-fit:contain;background:#
   <h2>Субтитры <span class="sw"><input type="checkbox" id="sOn" aria-label="Субтитры" checked><span></span></span></h2>
   <div class="body" id="sBody">
     <canvas id="cv" width="360" height="640" aria-label="Предпросмотр"></canvas>
+    <label class="f" style="margin-top:0"><span style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="auto" checked style="accent-color:var(--acc);width:20px;height:20px"> Субтитры сами по речи в видео</span></label>
+    <div class="two"><select id="alang" aria-label="Язык речи"><option value="russian">Русский</option><option value="english">English</option><option value="">Определить язык</option></select><button class="chip" id="asr" type="button">Распознать сейчас</button></div>
+    <p class="hint">В первый раз загрузится модель распознавания (около 100 МБ), потом будет быстрее. Видео никуда не отправляется, всё считается в твоём устройстве. Готовый текст можно поправить руками.</p>
     <label class="f" for="subs">Текст субтитров</label>
     <textarea id="subs" placeholder="Каждая строка — отдельный субтитр, они распределятся по видео поровну.&#10;Чтобы задать время, пиши так: 3 | Привет!"></textarea>
     <p class="hint">Время в секундах уже готового ролика. Строка «3 | Привет!» появится на 3-й секунде.</p>
@@ -110,13 +114,14 @@ canvas{display:block;width:100%;max-height:420px;object-fit:contain;background:#
       <button class="chip" type="button" aria-pressed="true">Снизу</button>
     </div>
     <label class="f"><span style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="sBox" style="accent-color:var(--acc);width:20px;height:20px"> Тёмная плашка под текстом</span></label>
+    <label class="f"><span style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="sOutl" style="accent-color:var(--acc);width:20px;height:20px"> Чёрный контур вокруг букв (по умолчанию выключен)</span></label>
   </div>
 </section>
 
-<button class="go" id="go" type="button">Смонтировать</button>
-<div class="bar" id="pbar" style="margin-top:12px" hidden><i id="pf"></i></div>
-<p class="hint" id="ptxt" hidden></p>
 <p class="msg" id="msg" role="alert" hidden></p>
+<p class="hint" id="ptxt" hidden></p>
+<div class="bar" id="pbar" style="margin-bottom:12px" hidden><i id="pf"></i></div>
+<button class="go" id="go" type="button">Смонтировать</button>
 <div class="res" id="res" hidden></div>
 </main>
 
@@ -137,11 +142,11 @@ function pick(box,cb){box.addEventListener("click",function(e){
   var b=e.target.closest("button");if(!b||!box.contains(b))return;
   box.querySelectorAll("[aria-pressed]").forEach(function(x){x.setAttribute("aria-pressed","false")});
   b.setAttribute("aria-pressed","true");cb&&cb(b)})}
-function err(m){var e=$("msg");e.textContent=m;e.hidden=false}
+function err(m){var e=$("msg");e.textContent=m;e.hidden=false;e.scrollIntoView({behavior:"smooth",block:"center"})}
 
 var vid=$("vid"),cv=$("cv"),cx=cv.getContext("2d"),file=null,dur=0,busy=false;
 var FONTS=[["Montserrat","Montserrat",800],["Oswald","Oswald",600],["Russo One","Russo One",400],["Pacifico","Pacifico",400],["Caveat","Caveat",700],["Comfortaa","Comfortaa",700]];
-var COLORS=["#FFFFFF","#FFD23F","#4DE1FF","#FF6FA8"];
+var COLORS=["#FFFFFF","#000000","#FFD23F","#F5C518","#FF9F1C","#FF3B30","#FF6FA8","#E040FB","#9B5DE5","#3B82F6","#4DE1FF","#2DD4BF","#34D399","#A3E635","#A0522D","#9CA3AF"];
 var st={font:FONTS[0],color:COLORS[0],pos:"Снизу"};
 
 /* controls */
@@ -153,9 +158,12 @@ pick(fb,function(b){st.font=FONTS[+b.dataset.i];redraw()});
 COLORS.forEach(function(c,i){var b=document.createElement("button");b.type="button";b.className="dot";
   b.style.background=c;b.setAttribute("aria-label","Цвет "+c);b.setAttribute("aria-pressed",i===0?"true":"false");b.dataset.c=c;$("colors").appendChild(b)});
 pick($("colors"),function(b){st.color=b.dataset.c;redraw()});
+var cc=document.createElement("input");cc.type="color";cc.value="#ffffff";cc.setAttribute("aria-label","Свой цвет");
+cc.addEventListener("input",function(){st.color=cc.value;$("colors").querySelectorAll("[aria-pressed]").forEach(function(x){x.setAttribute("aria-pressed","false")});redraw()});
+$("colors").appendChild(cc);
 pick($("pos"),function(b){st.pos=b.textContent;redraw()});
 $("sSize").addEventListener("input",function(){$("sSizeV").textContent=this.value;redraw()});
-["sBox","subs","sOn","fmt"].forEach(function(i){$(i).addEventListener("input",redraw);$(i).addEventListener("change",redraw)});
+["sBox","sOutl","subs","sOn","fmt"].forEach(function(i){$(i).addEventListener("input",redraw);$(i).addEventListener("change",redraw)});
 $("sOn").addEventListener("change",function(){$("sBody").hidden=!this.checked});
 document.fonts&&FONTS.forEach(function(f){document.fonts.load(f[2]+" 20px '"+f[1]+"'","Аa").then(redraw)});
 
@@ -165,7 +173,7 @@ drop.addEventListener("click",function(){inp.click()});
 drop.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();inp.click()}});
 inp.addEventListener("change",function(){
   var f=inp.files[0];if(!f)return;$("msg").hidden=true;
-  file=f;vid.src=URL.createObjectURL(f);vid.load();
+  file=f;asr=null;vid.src=URL.createObjectURL(f);vid.load();
   $("dname").textContent=f.name;$("dinfo").textContent="Загружаю…";drop.classList.add("on")});
 vid.addEventListener("loadedmetadata",function(){
   dur=vid.duration;
@@ -182,11 +190,11 @@ function dims(){var w=vid.videoWidth||360,h=vid.videoHeight||640,f=$("fmt").valu
   var s=Math.min(1,1280/Math.max(w,h));return[Math.round(w*s/2)*2,Math.round(h*s/2)*2]}
 function parse(total){
   var out=[];$("subs").value.split("\n").forEach(function(l){l=l.trim();if(!l)return;
-    var m=l.match(/^(\d+(?:[.,]\d+)?)\s*\|\s*(.+)$/);
-    out.push(m?{t:parseFloat(m[1].replace(",",".")),s:m[2]}:{t:null,s:l})});
+    var m=l.match(/^(\d+(?:[.,]\d+)?)(?:\s*-\s*(\d+(?:[.,]\d+)?))?\s*\|\s*(.+)$/);
+    out.push(m?{t:parseFloat(m[1].replace(",",".")),e:m[2]?parseFloat(m[2].replace(",",".")):null,s:m[3]}:{t:null,e:null,s:l})});
   var n=out.length;out.forEach(function(o,i){if(o.t===null)o.t=total*i/n});
   out.sort(function(a,b){return a.t-b.t});
-  out.forEach(function(o,i){o.e=i<n-1?out[i+1].t:total});return out}
+  out.forEach(function(o,i){if(o.e===null)o.e=i<n-1?out[i+1].t:total});return out}
 function wrap(text,max){var w=text.split(" "),ls=[],cur="";
   w.forEach(function(x){var t=cur?cur+" "+x:x;if(cx.measureText(t).width>max&&cur){ls.push(cur);cur=x}else cur=t});
   if(cur)ls.push(cur);return ls}
@@ -201,7 +209,7 @@ function caption(t,lines){
   if(st.pos==="Сверху")y0=H*0.1;else if(st.pos==="По центру")y0=(H-bh)/2;else y0=H*0.9-bh;
   ls.forEach(function(s,i){var y=y0+lh*i+lh/2;
     if($("sBox").checked){var tw=cx.measureText(s).width;cx.fillStyle="rgba(0,0,0,.65)";cx.fillRect(W/2-tw/2-size*0.3,y-lh/2,tw+size*0.6,lh)}
-    else{cx.strokeStyle="#000";cx.lineWidth=size/5;cx.strokeText(s,W/2,y)}
+    else if($("sOutl").checked){cx.strokeStyle="#000";cx.lineWidth=size/5;cx.strokeText(s,W/2,y)}
     cx.fillStyle=st.color;cx.fillText(s,W/2,y)})}
 function frame(t,lines){
   var W=cv.width,H=cv.height,vw=vid.videoWidth,vh=vid.videoHeight,s=Math.max(W/vw,H/vh),dw=vw*s,dh=vh*s;
@@ -215,9 +223,52 @@ function redraw(){
   frame(l2.length?l2[0].t+0.01:0,l2)}
 redraw();
 
+/* speech recognition */
+var asr=null,autoFilled=false,asrPipe=null;
+$("subs").addEventListener("input",function(){autoFilled=false});
+function say(t){$("ptxt").hidden=false;$("ptxt").textContent=t}
+async function getPipe(){
+  if(asrPipe)return asrPipe;
+  say("Загружаю модель распознавания…");
+  var mod=await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2");
+  mod.env.allowLocalModels=false;
+  asrPipe=await mod.pipeline("automatic-speech-recognition","Xenova/whisper-base",{dtype:"q8",progress_callback:function(p){if(p&&p.status==="progress"&&p.progress)say("Загружаю модель: "+Math.round(p.progress)+"%")}});
+  return asrPipe}
+async function asrCore(){
+  say("Читаю звук из видео…");
+  var buf=await file.arrayBuffer(),AC=window.AudioContext||window.webkitAudioContext,c=new AC(),ab;
+  try{ab=await c.decodeAudioData(buf)}catch(e){c.close();throw new Error("не удалось прочитать звук из этого видео")}
+  c.close();
+  var off=new OfflineAudioContext(1,Math.max(1,Math.ceil(ab.duration*16000)),16000),sr=off.createBufferSource();
+  sr.buffer=ab;sr.connect(off.destination);sr.start();
+  var audio=(await off.startRendering()).getChannelData(0);
+  var pipe=await getPipe();
+  say("Распознаю речь. Это может занять до минуты…");
+  var o={task:"transcribe",chunk_length_s:30,stride_length_s:5,return_timestamps:true},lg=$("alang").value;
+  if(lg)o.language=lg;
+  var r=await pipe(audio,o);
+  asr=(r.chunks||[]).map(function(k){return{t:k.timestamp[0]||0,e:k.timestamp[1]==null?dur:k.timestamp[1],s:(k.text||"").trim()}}).filter(function(g){return g.s});
+  if(!asr.length){asr=null;throw new Error("речь в видео не найдена")}}
+function mapSegs(){
+  var a0=+$("tStart").value||0,a1=+$("tEnd").value||dur,sp=+$("spd").value,out=[];
+  (asr||[]).forEach(function(g){var a=Math.max(g.t,a0),b=Math.min(g.e,a1);if(b-a<0.2)return;
+    out.push(((a-a0)/sp).toFixed(1)+"-"+((b-a0)/sp).toFixed(1)+" | "+g.s)});
+  return out.join("\n")}
+$("asr").addEventListener("click",async function(){
+  $("msg").hidden=true;
+  if(!file){err("Сначала выбери видео.");return}
+  if(busy)return;
+  busy=true;$("asr").disabled=true;$("go").disabled=true;
+  var ok=false;
+  try{await asrCore();$("subs").value=mapSegs();autoFilled=true;ok=true}
+  catch(e){err("Не удалось распознать речь: "+(e&&e.message?e.message:"ошибка")+".");$("ptxt").hidden=true}
+  busy=false;$("asr").disabled=false;$("go").disabled=false;
+  if(ok){say("Готово: субтитры появились в поле ниже. Их можно поправить руками.");redraw()}
+});
+
 /* recording */
 var ac=null,dest=null;
-function seek(t){return new Promise(function(r){var h=function(){vid.removeEventListener("seeked",h);r()};vid.addEventListener("seeked",h);vid.currentTime=t})}
+function seek(t){return new Promise(function(r){if(Math.abs(vid.currentTime-t)<0.02){r();return}var d=false,h=function(){if(d)return;d=true;vid.removeEventListener("seeked",h);r()};vid.addEventListener("seeked",h);setTimeout(h,3000);vid.currentTime=t})}
 $("go").addEventListener("click",async function(){
   $("msg").hidden=true;$("res").hidden=true;
   if(busy)return;
@@ -228,9 +279,12 @@ $("go").addEventListener("click",async function(){
   var types=["video/mp4;codecs=avc1.42E01E,mp4a.40.2","video/mp4","video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
   var mt=window.MediaRecorder&&types.filter(function(t){return MediaRecorder.isTypeSupported(t)})[0];
   if(!mt){err("Этот браузер не умеет записывать видео. Открой сайт в Chrome, Edge или Safari.");return}
-  vid.play().then(function(){vid.pause()}).catch(function(){});
-  busy=true;$("go").disabled=true;$("pbar").hidden=false;$("ptxt").hidden=false;
+  busy=true;$("go").disabled=true;$("go").textContent="Запускаю…";$("pbar").hidden=false;$("ptxt").hidden=false;$("ptxt").textContent="Подготовка…";
   try{
+    try{await vid.play();vid.pause()}catch(e){}
+    if($("sOn").checked&&$("auto").checked&&(!$("subs").value.trim()||autoFilled)){
+      if(!asr)await asrCore();
+      $("subs").value=mapSegs();autoFilled=true}
     var total=(end-start)/spd,lines=parse(total),d=dims();
     if(document.fonts)await document.fonts.load(st.font[2]+" 20px '"+st.font[1]+"'","Аa");
     cv.width=d[0];cv.height=d[1];
@@ -244,20 +298,22 @@ $("go").addEventListener("click",async function(){
     await seek(start);vid.playbackRate=spd;
     rec.start(500);await vid.play();
     $("ptxt").textContent="Монтаж идёт. Не закрывай и не сворачивай эту страницу.";
+    var t0=Date.now();
     await new Promise(function(done){(function loop(){
       var t=vid.currentTime;
-      if(t>=end||vid.ended||vid.paused){done();return}
+      if(t>=end||vid.ended||vid.paused||(Date.now()-t0>8000&&t<=start+0.05)){done();return}
       frame((t-start)/spd,lines);
-      $("pf").style.width=Math.min(100,(t-start)/(end-start)*100)+"%";
+      var pc=Math.min(100,Math.round((t-start)/(end-start)*100));$("pf").style.width=pc+"%";$("go").textContent="Монтирую… "+pc+"%";
       requestAnimationFrame(loop)})()});
     vid.pause();rec.stop();await stopped;
+    if(vid.currentTime<=start+0.05)throw new Error("видео не запустилось. Попробуй другой файл или браузер Chrome");
     var blob=new Blob(chunks,{type:mt.split(";")[0]}),url=URL.createObjectURL(blob),ext=mt.indexOf("mp4")>=0?"mp4":"webm";
     var a=active();a.push(Date.now());save(a);var left=renderLimit();
     var r=$("res");
     r.innerHTML="<strong>Готово</strong><video controls playsinline src=\""+url+"\"></video><a href=\""+url+"\" download=\"montage."+ext+"\">Скачать видео ("+ext.toUpperCase()+")</a><p class=\"hint\">На iPhone, если видео не скачалось: открой его и нажми «Поделиться» → «Сохранить видео». Осталось видео: "+left+" из "+LIMIT+".</p>";
     r.hidden=false;r.scrollIntoView({behavior:"smooth",block:"nearest"});
   }catch(e){err("Монтаж не получился: "+(e&&e.message?e.message:"неизвестная ошибка")+". Отправь этот текст Claude.")}
-  busy=false;$("go").disabled=false;$("pbar").hidden=true;$("ptxt").hidden=true;$("pf").style.width="0";
+  busy=false;$("go").disabled=false;$("go").textContent="Смонтировать";$("pbar").hidden=true;$("ptxt").hidden=true;$("pf").style.width="0";
   await seek(start).catch(function(){});redraw();
 });
 renderLimit();
