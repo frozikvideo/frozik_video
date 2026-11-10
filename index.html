@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#3B4BF0">
+<meta name="apple-mobile-web-app-title" content="Frozik Video">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>Монтаж видео</title>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&family=Unbounded:wght@600&family=Montserrat:wght@800&family=Oswald:wght@600&family=Russo+One&family=Pacifico&family=Caveat:wght@700&family=Comfortaa:wght@700&display=swap&subset=cyrillic" rel="stylesheet">
 <style>
@@ -373,5 +378,6 @@ $("go").addEventListener("click",async function(){
 renderLimit();
 })();
 </script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){})})}</script>
 </body>
 </html>
