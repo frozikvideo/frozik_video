@@ -54,6 +54,7 @@ canvas{display:block;width:100%;max-height:420px;object-fit:contain;background:#
 .res a{display:block;text-align:center;background:var(--acc);color:var(--accink);text-decoration:none;font-weight:800;border-radius:12px;padding:12px}
 .hint{color:var(--mute);font-size:13px;margin:6px 0 0}
 .dots input[type=color]{width:32px;height:32px;padding:0;border:0;border-radius:50%;background:none;cursor:pointer}
+.clip{display:flex;align-items:center;gap:8px;margin:8px 0}.clip span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.clip .chip{padding:5px 10px}
 #vid{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -61,7 +62,7 @@ canvas{display:block;width:100%;max-height:420px;object-fit:contain;background:#
 <body>
 <main>
 <h1>Монтаж видео</h1>
-<p class="lead">Загрузи видео, настрой обрезку, скорость и субтитры, нажми «Смонтировать».</p>
+<p class="lead">Загрузи одно видео или несколько (они склеятся по порядку), настрой субтитры и нажми «Смонтировать».</p>
 
 <div class="meter" aria-live="polite">
   <div style="flex:1"><b id="left">25 из 25</b> видео доступно<small id="reset">Лимит: 25 видео за 12 часов</small></div>
@@ -72,14 +73,16 @@ canvas{display:block;width:100%;max-height:420px;object-fit:contain;background:#
   <h2>Видео</h2>
   <div class="drop" id="drop" tabindex="0" role="button" aria-label="Выбрать видео">
     <strong id="dname">Выбрать видео</strong>
-    <span id="dinfo">До 2 минут. Лучше MP4 или MOV</span>
+    <span id="dinfo">До 4 видео сразу, всего до 300 МБ. Лучше MP4 или MOV</span>
   </div>
-  <input type="file" id="file" accept="video/*" hidden>
+  <input type="file" id="file" accept="video/*" multiple hidden>
+  <div id="clips"></div>
   <video id="vid" playsinline preload="auto"></video>
 </section>
 
 <section>
   <h2>Обрезка и скорость</h2>
+  <p class="hint" id="trimNote" hidden style="margin:0 0 8px">Обрезка работает, когда выбрано одно видео. Скорость, формат и звук применяются ко всем видео сразу.</p>
   <div class="two">
     <div><label class="f" for="tStart" style="margin-top:0">Начало, сек</label><input type="number" id="tStart" min="0" step="0.1" value="0"></div>
     <div><label class="f" for="tEnd" style="margin-top:0">Конец, сек</label><input type="number" id="tEnd" min="0" step="0.1" value="0"></div>
@@ -167,22 +170,52 @@ $("sSize").addEventListener("input",function(){$("sSizeV").textContent=this.valu
 $("sOn").addEventListener("change",function(){$("sBody").hidden=!this.checked});
 document.fonts&&FONTS.forEach(function(f){document.fonts.load(f[2]+" 20px '"+f[1]+"'","Аa").then(redraw)});
 
-/* file */
+/* clips */
+var clips=[],MAXN=4,MAXMB=300,MAXSEC=600;
 var drop=$("drop"),inp=$("file");
 drop.addEventListener("click",function(){inp.click()});
 drop.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();inp.click()}});
-inp.addEventListener("change",function(){
-  var f=inp.files[0];if(!f)return;$("msg").hidden=true;
-  file=f;asr=null;vid.src=URL.createObjectURL(f);vid.load();
-  $("dname").textContent=f.name;$("dinfo").textContent="Загружаю…";drop.classList.add("on")});
-vid.addEventListener("loadedmetadata",function(){
-  dur=vid.duration;
-  if(dur>121){err("Видео длиннее 2 минут. Выбери покороче.");file=null;$("dinfo").textContent="Выбери другое видео";return}
-  $("tStart").value=0;$("tEnd").value=dur.toFixed(1);
-  $("dinfo").textContent=dur.toFixed(1).replace(".",",")+" сек. Нажми, чтобы заменить";
-  vid.currentTime=Math.min(0.1,dur/2)});
+function meta(f){return new Promise(function(res,rej){var v=document.createElement("video"),u=URL.createObjectURL(f);
+  v.preload="metadata";v.onloadedmetadata=function(){res({file:f,name:f.name,size:f.size,dur:v.duration,url:u,asr:null})};
+  v.onerror=function(){rej(new Error("Не удалось открыть «"+f.name+"». Попробуй MP4 или MOV."))};v.src=u})}
+inp.addEventListener("change",async function(){
+  var fs=Array.prototype.slice.call(inp.files);inp.value="";
+  if(!fs.length)return;$("msg").hidden=true;
+  for(var i=0;i<fs.length;i++){
+    if(clips.length>=MAXN){err("Можно не больше "+MAXN+" видео за раз.");break}
+    var tot=clips.reduce(function(a,c){return a+c.size},0)+fs[i].size;
+    if(tot>MAXMB*1048576){err("Общий размер больше "+MAXMB+" МБ. «"+fs[i].name+"» не добавлено.");break}
+    try{var c=await meta(fs[i]);
+      if(clips.reduce(function(a,x){return a+x.dur},0)+c.dur>MAXSEC){err("Общая длина больше "+MAXSEC/60+" минут. «"+fs[i].name+"» не добавлено.");break}
+      clips.push(c)}catch(e){err(e.message);break}}
+  refresh()});
+function seg(i){var c=clips[i];if(clips.length===1){return[Math.max(0,+$("tStart").value||0),Math.min(c.dur,+$("tEnd").value||c.dur)]}return[0,c.dur]}
+function totalOut(){var sp=+$("spd").value,t=0;clips.forEach(function(c,i){var g=seg(i);t+=(g[1]-g[0])/sp});return t}
+function refresh(){
+  var L=$("clips");L.innerHTML="";
+  clips.forEach(function(c,i){
+    var row=document.createElement("div");row.className="clip";
+    var nm=document.createElement("span");nm.textContent=(i+1)+". "+c.name+" · "+c.dur.toFixed(1).replace(".",",")+" с";row.appendChild(nm);
+    [["↑",-1,"Выше"],["↓",1,"Ниже"],["✕",0,"Убрать видео"]].forEach(function(a){
+      var b=document.createElement("button");b.type="button";b.className="chip";b.textContent=a[0];b.setAttribute("aria-label",a[2]);
+      b.addEventListener("click",function(){if(busy)return;
+        if(a[1]===0)clips.splice(i,1);else{var j=i+a[1];if(j<0||j>=clips.length)return;var t=clips[i];clips[i]=clips[j];clips[j]=t}
+        refresh()});row.appendChild(b)});
+    L.appendChild(row)});
+  file=clips.length?clips[0].file:null;
+  var one=clips.length===1;
+  $("tStart").disabled=!one;$("tEnd").disabled=!one;$("trimNote").hidden=one||!clips.length;
+  if(one){$("tStart").value=0;$("tEnd").value=clips[0].dur.toFixed(1);dur=clips[0].dur}else dur=0;
+  var mb=clips.reduce(function(a,c){return a+c.size},0)/1048576;
+  $("dname").textContent=clips.length?"Добавить ещё видео":"Выбрать видео";
+  $("dinfo").textContent=clips.length?clips.length+" из "+MAXN+" видео, "+mb.toFixed(1).replace(".",",")+" из "+MAXMB+" МБ":"До "+MAXN+" видео сразу, всего до "+MAXMB+" МБ. Лучше MP4 или MOV";
+  drop.classList.toggle("on",!!clips.length);
+  if(clips.length){vid.src=clips[0].url;vid.load()}else{vid.removeAttribute("src");vid.load()}
+  redraw()}
+vid.addEventListener("loadeddata",function(){if(!busy){try{vid.currentTime=Math.min(0.1,(vid.duration||1)/2)}catch(e){}}});
 vid.addEventListener("seeked",function(){if(!busy)redraw()});
-vid.addEventListener("error",function(){err("Не удалось открыть это видео. Попробуй MP4 или MOV.");file=null});
+vid.addEventListener("error",function(){if(!busy&&vid.getAttribute("src"))err("Не удалось открыть это видео. Попробуй MP4 или MOV.")});
+$("alang").addEventListener("change",function(){clips.forEach(function(c){c.asr=null})});
 
 /* drawing */
 function dims(){var w=vid.videoWidth||360,h=vid.videoHeight||640,f=$("fmt").value;
@@ -212,14 +245,14 @@ function caption(t,lines){
     else if($("sOutl").checked){cx.strokeStyle="#000";cx.lineWidth=size/5;cx.strokeText(s,W/2,y)}
     cx.fillStyle=st.color;cx.fillText(s,W/2,y)})}
 function frame(t,lines){
-  var W=cv.width,H=cv.height,vw=vid.videoWidth,vh=vid.videoHeight,s=Math.max(W/vw,H/vh),dw=vw*s,dh=vh*s;
+  var W=cv.width,H=cv.height,vw=vid.videoWidth,vh=vid.videoHeight,s=($("fmt").value==="orig"?Math.min:Math.max)(W/vw,H/vh),dw=vw*s,dh=vh*s;
   cx.fillStyle="#000";cx.fillRect(0,0,W,H);cx.drawImage(vid,(W-dw)/2,(H-dh)/2,dw,dh);caption(t,lines)}
 function redraw(){
   if(busy)return;var d=dims();
   if(!file||!vid.videoWidth){cv.width=360;cv.height=640;cx.fillStyle="#222";cx.fillRect(0,0,360,640);
     var l=parse(10);cx.fillStyle="#222";caption(0,[{t:0,e:99,s:l[0]?l[0].s:"Так будут выглядеть субтитры"}]);return}
   if(cv.width!==d[0]||cv.height!==d[1]){cv.width=d[0];cv.height=d[1]}
-  var spd=+$("spd").value,tot=Math.max(1,((+$("tEnd").value||dur)-(+$("tStart").value||0))/spd),l2=parse(tot);
+  var tot=Math.max(1,totalOut()),l2=parse(tot);
   frame(l2.length?l2[0].t+0.01:0,l2)}
 redraw();
 
@@ -235,24 +268,30 @@ async function getPipe(){
   asrPipe=await mod.pipeline("automatic-speech-recognition","Xenova/whisper-base",{dtype:"q8",progress_callback:function(p){if(p&&p.status==="progress"&&p.progress)say("Загружаю модель: "+Math.round(p.progress)+"%")}});
   return asrPipe}
 async function asrCore(){
-  say("Читаю звук из видео…");
-  var buf=await file.arrayBuffer(),AC=window.AudioContext||window.webkitAudioContext,c=new AC(),ab;
-  try{ab=await c.decodeAudioData(buf)}catch(e){c.close();throw new Error("не удалось прочитать звук из этого видео")}
-  c.close();
-  var off=new OfflineAudioContext(1,Math.max(1,Math.ceil(ab.duration*16000)),16000),sr=off.createBufferSource();
-  sr.buffer=ab;sr.connect(off.destination);sr.start();
-  var audio=(await off.startRendering()).getChannelData(0);
-  var pipe=await getPipe();
-  say("Распознаю речь. Это может занять до минуты…");
-  var o={task:"transcribe",chunk_length_s:30,stride_length_s:5,return_timestamps:true},lg=$("alang").value;
-  if(lg)o.language=lg;
-  var r=await pipe(audio,o);
-  asr=(r.chunks||[]).map(function(k){return{t:k.timestamp[0]||0,e:k.timestamp[1]==null?dur:k.timestamp[1],s:(k.text||"").trim()}}).filter(function(g){return g.s});
-  if(!asr.length){asr=null;throw new Error("речь в видео не найдена")}}
+  var pipe=null,found=0;
+  for(var i=0;i<clips.length;i++){var c=clips[i];
+    if(!c.asr){
+      say("Читаю звук: видео "+(i+1)+" из "+clips.length+"…");
+      var buf=await c.file.arrayBuffer(),AC=window.AudioContext||window.webkitAudioContext,x=new AC(),ab;
+      try{ab=await x.decodeAudioData(buf)}catch(e){x.close();throw new Error("не удалось прочитать звук из видео "+(i+1))}
+      x.close();
+      var off=new OfflineAudioContext(1,Math.max(1,Math.ceil(ab.duration*16000)),16000),sr=off.createBufferSource();
+      sr.buffer=ab;sr.connect(off.destination);sr.start();
+      var audio=(await off.startRendering()).getChannelData(0);
+      pipe=pipe||await getPipe();
+      say("Распознаю речь: видео "+(i+1)+" из "+clips.length+"…");
+      var o={task:"transcribe",chunk_length_s:30,stride_length_s:5,return_timestamps:true},lg=$("alang").value;
+      if(lg)o.language=lg;
+      var r=await pipe(audio,o);
+      c.asr=(r.chunks||[]).map(function(k){return{t:k.timestamp[0]||0,e:k.timestamp[1]==null?c.dur:k.timestamp[1],s:(k.text||"").trim()}}).filter(function(g){return g.s})}
+    found+=c.asr.length}
+  if(!found)throw new Error("речь в видео не найдена")}
 function mapSegs(){
-  var a0=+$("tStart").value||0,a1=+$("tEnd").value||dur,sp=+$("spd").value,out=[];
-  (asr||[]).forEach(function(g){var a=Math.max(g.t,a0),b=Math.min(g.e,a1);if(b-a<0.2)return;
-    out.push(((a-a0)/sp).toFixed(1)+"-"+((b-a0)/sp).toFixed(1)+" | "+g.s)});
+  var sp=+$("spd").value,off=0,out=[];
+  clips.forEach(function(c,i){var g=seg(i);
+    (c.asr||[]).forEach(function(h){var a=Math.max(h.t,g[0]),b=Math.min(h.e,g[1]);if(b-a<0.2)return;
+      out.push((off+(a-g[0])/sp).toFixed(1)+"-"+(off+(b-g[0])/sp).toFixed(1)+" | "+h.s)});
+    off+=(g[1]-g[0])/sp});
   return out.join("\n")}
 $("asr").addEventListener("click",async function(){
   $("msg").hidden=true;
@@ -269,12 +308,16 @@ $("asr").addEventListener("click",async function(){
 /* recording */
 var ac=null,dest=null;
 function seek(t){return new Promise(function(r){if(Math.abs(vid.currentTime-t)<0.02){r();return}var d=false,h=function(){if(d)return;d=true;vid.removeEventListener("seeked",h);r()};vid.addEventListener("seeked",h);setTimeout(h,3000);vid.currentTime=t})}
+function loadClip(c){return new Promise(function(res,rej){
+  var d=false,ok=function(){if(d)return;d=true;vid.removeEventListener("loadeddata",ok);res()};
+  vid.addEventListener("loadeddata",ok);setTimeout(function(){if(!d)rej(new Error("видео не загрузилось"))},15000);
+  vid.src=c.url;vid.load()})}
 $("go").addEventListener("click",async function(){
   $("msg").hidden=true;$("res").hidden=true;
   if(busy)return;
-  if(!file){err("Сначала выбери видео.");return}
-  var start=Math.max(0,+$("tStart").value||0),end=Math.min(dur,+$("tEnd").value||dur),spd=+$("spd").value;
-  if(end-start<0.5){err("Конец должен быть позже начала хотя бы на полсекунды.");return}
+  if(!clips.length){err("Сначала выбери видео.");return}
+  var spd=+$("spd").value,segs=clips.map(function(c,i){return seg(i)});
+  for(var q=0;q<segs.length;q++)if(segs[q][1]-segs[q][0]<0.5){err("Конец должен быть позже начала хотя бы на полсекунды.");return}
   if(renderLimit()<=0){err("Лимит исчерпан: 25 видео за 12 часов. Попробуй позже.");return}
   var types=["video/mp4;codecs=avc1.42E01E,mp4a.40.2","video/mp4","video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
   var mt=window.MediaRecorder&&types.filter(function(t){return MediaRecorder.isTypeSupported(t)})[0];
@@ -283,9 +326,11 @@ $("go").addEventListener("click",async function(){
   try{
     try{await vid.play();vid.pause()}catch(e){}
     if($("sOn").checked&&$("auto").checked&&(!$("subs").value.trim()||autoFilled)){
-      if(!asr)await asrCore();
+      if(!clips.every(function(c){return c.asr}))await asrCore();
       $("subs").value=mapSegs();autoFilled=true}
-    var total=(end-start)/spd,lines=parse(total),d=dims();
+    var total=Math.max(1,totalOut()),lines=parse(total);
+    await loadClip(clips[0]);
+    var d=dims();
     if(document.fonts)await document.fonts.load(st.font[2]+" 20px '"+st.font[1]+"'","Аa");
     cv.width=d[0];cv.height=d[1];
     var stream=cv.captureStream(30);
@@ -295,26 +340,35 @@ $("go").addEventListener("click",async function(){
     var chunks=[],rec=new MediaRecorder(stream,{mimeType:mt,videoBitsPerSecond:4000000});
     rec.ondataavailable=function(e){if(e.data&&e.data.size)chunks.push(e.data)};
     var stopped=new Promise(function(r){rec.onstop=r});
-    await seek(start);vid.playbackRate=spd;
-    rec.start(500);await vid.play();
+    rec.start(500);
     $("ptxt").textContent="Монтаж идёт. Не закрывай и не сворачивай эту страницу.";
-    var t0=Date.now();
-    await new Promise(function(done){(function loop(){
-      var t=vid.currentTime;
-      if(t>=end||vid.ended||vid.paused||(Date.now()-t0>8000&&t<=start+0.05)){done();return}
-      frame((t-start)/spd,lines);
-      var pc=Math.min(100,Math.round((t-start)/(end-start)*100));$("pf").style.width=pc+"%";$("go").textContent="Монтирую… "+pc+"%";
-      requestAnimationFrame(loop)})()});
-    vid.pause();rec.stop();await stopped;
-    if(vid.currentTime<=start+0.05)throw new Error("видео не запустилось. Попробуй другой файл или браузер Chrome");
+    var off=0;
+    for(var n=0;n<clips.length;n++){
+      var g=segs[n];
+      if(n>0)await loadClip(clips[n]);
+      await seek(g[0]);vid.playbackRate=spd;
+      await vid.play();
+      var t0=Date.now(),moved=false;
+      await new Promise(function(done){(function loop(){
+        var t=vid.currentTime;
+        if(t>g[0]+0.05)moved=true;
+        if(t>=g[1]||vid.ended||vid.paused||(!moved&&Date.now()-t0>8000)){done();return}
+        var to=off+(t-g[0])/spd;frame(to,lines);
+        var pc=Math.min(100,Math.round(to/total*100));$("pf").style.width=pc+"%";$("go").textContent="Монтирую… "+pc+"%";
+        requestAnimationFrame(loop)})()});
+      vid.pause();
+      if(!moved)throw new Error("видео "+(n+1)+" не запустилось. Попробуй другой файл или браузер Chrome");
+      off+=(g[1]-g[0])/spd}
+    rec.stop();await stopped;
     var blob=new Blob(chunks,{type:mt.split(";")[0]}),url=URL.createObjectURL(blob),ext=mt.indexOf("mp4")>=0?"mp4":"webm";
     var a=active();a.push(Date.now());save(a);var left=renderLimit();
     var r=$("res");
-    r.innerHTML="<strong>Готово</strong><video controls playsinline src=\""+url+"\"></video><a href=\""+url+"\" download=\"montage."+ext+"\">Скачать видео ("+ext.toUpperCase()+")</a><p class=\"hint\">На iPhone, если видео не скачалось: открой его и нажми «Поделиться» → «Сохранить видео». Осталось видео: "+left+" из "+LIMIT+".</p>";
+    r.innerHTML='<strong>Готово</strong><video controls playsinline src="'+url+'"></video><a href="'+url+'" download="montage.'+ext+'">Скачать видео ('+ext.toUpperCase()+')</a><p class="hint">На iPhone, если видео не скачалось: открой его и нажми «Поделиться» → «Сохранить видео». Осталось видео: '+left+' из '+LIMIT+'.</p>';
     r.hidden=false;r.scrollIntoView({behavior:"smooth",block:"nearest"});
   }catch(e){err("Монтаж не получился: "+(e&&e.message?e.message:"неизвестная ошибка")+". Отправь этот текст Claude.")}
   busy=false;$("go").disabled=false;$("go").textContent="Смонтировать";$("pbar").hidden=true;$("ptxt").hidden=true;$("pf").style.width="0";
-  await seek(start).catch(function(){});redraw();
+  try{await loadClip(clips[0])}catch(e){}
+  redraw();
 });
 renderLimit();
 })();
