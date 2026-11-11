@@ -104,8 +104,8 @@ canvas{display:block;width:100%;max-height:420px;object-fit:contain;background:#
   <div class="body" id="sBody">
     <canvas id="cv" width="360" height="640" aria-label="Предпросмотр"></canvas>
     <label class="f" style="margin-top:0"><span style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="auto" checked style="accent-color:var(--acc);width:20px;height:20px"> Субтитры сами по речи в видео</span></label>
-    <div class="two"><select id="alang" aria-label="Язык речи"><option value="russian">Русский</option><option value="english">English</option><option value="">Определить язык</option></select><button class="chip" id="asr" type="button">Распознать сейчас</button></div>
-    <p class="hint">В первый раз загрузится модель распознавания (около 100 МБ), потом будет быстрее. Видео никуда не отправляется, всё считается в твоём устройстве. Готовый текст можно поправить руками.</p>
+    <div class="two"><select id="alang" aria-label="Язык речи"><option value="">Определить автоматически (около 99 языков)</option><option value="russian">Русский</option><option value="english">English</option><option value="ukrainian">Українська</option><option value="kazakh">Қазақша</option><option value="uzbek">Oʻzbekcha</option><option value="turkish">Türkçe</option><option value="azerbaijani">Azərbaycanca</option><option value="tajik">Тоҷикӣ</option><option value="turkmen">Türkmençe</option><option value="tatar">Татарча</option><option value="bashkir">Башҡортса</option><option value="belarusian">Беларуская</option><option value="georgian">ქართული</option><option value="armenian">Հայերեն</option><option value="persian">فارسی</option><option value="arabic">العربية</option><option value="hebrew">עברית</option><option value="hindi">हिन्दी</option><option value="urdu">اردو</option><option value="bengali">বাংলা</option><option value="chinese">中文</option><option value="japanese">日本語</option><option value="korean">한국어</option><option value="vietnamese">Tiếng Việt</option><option value="thai">ไทย</option><option value="indonesian">Indonesia</option><option value="malay">Melayu</option><option value="spanish">Español</option><option value="portuguese">Português</option><option value="french">Français</option><option value="german">Deutsch</option><option value="italian">Italiano</option><option value="dutch">Nederlands</option><option value="polish">Polski</option><option value="czech">Čeština</option><option value="swedish">Svenska</option><option value="greek">Ελληνικά</option><option value="romanian">Română</option><option value="hungarian">Magyar</option><option value="bulgarian">Български</option><option value="serbian">Српски</option></select><button class="chip" id="asr" type="button">Распознать сейчас</button></div>
+    <p class="hint">В первый раз загрузится модель распознавания (на телефоне около 40 МБ, на компьютере около 100 МБ), потом будет быстрее. Большие видео на телефоне «прослушиваются» в реальном времени. Видео никуда не отправляется, всё считается в твоём устройстве. Готовый текст можно поправить руками.</p>
     <label class="f" for="subs">Текст субтитров</label>
     <textarea id="subs" placeholder="Каждая строка — отдельный субтитр, они распределятся по видео поровну.&#10;Чтобы задать время, пиши так: 3 | Привет!"></textarea>
     <p class="hint">Время в секундах уже готового ролика. Строка «3 | Привет!» появится на 3-й секунде.</p>
@@ -265,30 +265,54 @@ redraw();
 var asr=null,autoFilled=false,asrPipe=null;
 $("subs").addEventListener("input",function(){autoFilled=false});
 function say(t){$("ptxt").hidden=false;$("ptxt").textContent=t}
+function mobile(){return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&/Mac/.test(navigator.platform))}
 async function getPipe(){
   if(asrPipe)return asrPipe;
   say("Загружаю модель распознавания…");
-  var mod=await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2");
+  var mod=await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2"),got={};
   mod.env.allowLocalModels=false;
-  asrPipe=await mod.pipeline("automatic-speech-recognition","Xenova/whisper-base",{dtype:"q8",progress_callback:function(p){if(p&&p.status==="progress"&&p.progress)say("Загружаю модель: "+Math.round(p.progress)+"%")}});
+  try{mod.env.backends.onnx.wasm.numThreads=1}catch(e){}
+  asrPipe=await mod.pipeline("automatic-speech-recognition",mobile()?"Xenova/whisper-tiny":"Xenova/whisper-base",{dtype:"q8",progress_callback:function(p){
+    if(p&&p.status==="progress"&&p.file){got[p.file]=p.loaded||0;var t=0;for(var k in got)t+=got[k];say("Загружаю модель: "+(t/1048576).toFixed(0)+" МБ")}}});
   return asrPipe}
+function graph(){if(!ac){ac=new(window.AudioContext||window.webkitAudioContext)();gsrc=ac.createMediaElementSource(vid);dest=ac.createMediaStreamDestination();gsrc.connect(dest)}return ac}
+async function awake(){try{var w=await navigator.wakeLock.request("screen");return function(){try{w.release()}catch(e){}}}catch(e){return function(){}}}
+async function capture(c,onp){
+  await loadClip(c);graph();await ac.resume();
+  var chunks=[],n=0,ratio=ac.sampleRate/16000,sp=ac.createScriptProcessor(4096,1,1),mute=ac.createGain();
+  mute.gain.value=0;
+  sp.onaudioprocess=function(e){var d=e.inputBuffer.getChannelData(0),m=Math.floor(d.length/ratio),o=new Float32Array(m);
+    for(var i=0;i<m;i++)o[i]=d[Math.floor(i*ratio)];chunks.push(o);n+=m};
+  gsrc.connect(sp);sp.connect(mute);mute.connect(ac.destination);
+  vid.currentTime=0;vid.playbackRate=1;await vid.play();
+  var iv=setInterval(function(){onp(vid.currentTime/c.dur)},500);
+  await new Promise(function(d){vid.onended=d;vid.onpause=d});
+  clearInterval(iv);vid.onended=null;vid.onpause=null;vid.pause();
+  try{gsrc.disconnect(sp);sp.disconnect();mute.disconnect()}catch(e){}
+  var out=new Float32Array(n),q=0;chunks.forEach(function(x){out.set(x,q);q+=x.length});return out}
 async function asrCore(){
   var pipe=null,found=0;
   for(var i=0;i<clips.length;i++){var c=clips[i];
     if(!c.asr){
-      say("Читаю звук: видео "+(i+1)+" из "+clips.length+"…");
-      var buf=await c.file.arrayBuffer(),AC=window.AudioContext||window.webkitAudioContext,x=new AC(),ab;
-      try{ab=await x.decodeAudioData(buf)}catch(e){x.close();throw new Error("не удалось прочитать звук из видео "+(i+1))}
-      x.close();
-      var off=new OfflineAudioContext(1,Math.max(1,Math.ceil(ab.duration*16000)),16000),sr=off.createBufferSource();
-      sr.buffer=ab;sr.connect(off.destination);sr.start();
-      var audio=(await off.startRendering()).getChannelData(0);
+      var audio;
+      if(c.size>40*1048576){audio=await capture(c,function(f){say("Слушаю видео "+(i+1)+" из "+clips.length+": "+Math.round(f*100)+"%. Не сворачивай страницу.")})}
+      else{
+        say("Читаю звук: видео "+(i+1)+" из "+clips.length+"…");
+        var buf=await c.file.arrayBuffer(),AC=window.AudioContext||window.webkitAudioContext,x=new AC(),ab;
+        try{ab=await x.decodeAudioData(buf)}catch(e){x.close();throw new Error("не удалось прочитать звук из видео "+(i+1))}
+        x.close();
+        var off=new OfflineAudioContext(1,Math.max(1,Math.ceil(ab.duration*16000)),16000),sr=off.createBufferSource();
+        sr.buffer=ab;sr.connect(off.destination);sr.start();
+        audio=(await off.startRendering()).getChannelData(0)}
       pipe=pipe||await getPipe();
-      say("Распознаю речь: видео "+(i+1)+" из "+clips.length+"…");
-      var o={task:"transcribe",chunk_length_s:30,stride_length_s:5,return_timestamps:true},lg=$("alang").value;
+      var o={task:"transcribe",return_timestamps:true},lg=$("alang").value,P=480000,segs=[],np=Math.ceil(audio.length/P);
       if(lg)o.language=lg;
-      var r=await pipe(audio,o);
-      c.asr=(r.chunks||[]).map(function(k){return{t:k.timestamp[0]||0,e:k.timestamp[1]==null?c.dur:k.timestamp[1],s:(k.text||"").trim()}}).filter(function(g){return g.s})}
+      for(var s0=0,k=0;s0<audio.length;s0+=P,k++){
+        say("Распознаю речь: видео "+(i+1)+" из "+clips.length+", часть "+(k+1)+" из "+np+"…");
+        await new Promise(function(r){setTimeout(r,30)});
+        var rr=await pipe(audio.subarray(s0,s0+P),o),base=s0/16000;
+        (rr.chunks||[]).forEach(function(h){var t=(h.text||"").trim();if(t)segs.push({t:base+(h.timestamp[0]||0),e:base+(h.timestamp[1]==null?30:h.timestamp[1]),s:t})})}
+      c.asr=segs}
     found+=c.asr.length}
   if(!found)throw new Error("речь в видео не найдена")}
 function mapSegs(){
@@ -303,15 +327,15 @@ $("asr").addEventListener("click",async function(){
   if(!file){err("Сначала выбери видео.");return}
   if(busy)return;
   busy=true;$("asr").disabled=true;$("go").disabled=true;
-  var ok=false;
-  try{await asrCore();$("subs").value=mapSegs();autoFilled=true;ok=true}
+  var ok=false,rel=function(){};
+  try{try{await vid.play();vid.pause()}catch(e){}rel=await awake();await asrCore();$("subs").value=mapSegs();autoFilled=true;ok=true}
   catch(e){err("Не удалось распознать речь: "+(e&&e.message?e.message:"ошибка")+".");$("ptxt").hidden=true}
-  busy=false;$("asr").disabled=false;$("go").disabled=false;
+  rel();busy=false;$("asr").disabled=false;$("go").disabled=false;try{await loadClip(clips[0])}catch(e){}
   if(ok){say("Готово: субтитры появились в поле ниже. Их можно поправить руками.");redraw()}
 });
 
 /* recording */
-var ac=null,dest=null;
+var ac=null,dest=null,gsrc=null;
 function seek(t){return new Promise(function(r){if(Math.abs(vid.currentTime-t)<0.02){r();return}var d=false,h=function(){if(d)return;d=true;vid.removeEventListener("seeked",h);r()};vid.addEventListener("seeked",h);setTimeout(h,3000);vid.currentTime=t})}
 function loadClip(c){return new Promise(function(res,rej){
   var d=false,ok=function(){if(d)return;d=true;vid.removeEventListener("loadeddata",ok);res()};
@@ -327,9 +351,10 @@ $("go").addEventListener("click",async function(){
   var types=["video/mp4;codecs=avc1.42E01E,mp4a.40.2","video/mp4","video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
   var mt=window.MediaRecorder&&types.filter(function(t){return MediaRecorder.isTypeSupported(t)})[0];
   if(!mt){err("Этот браузер не умеет записывать видео. Открой сайт в Chrome, Edge или Safari.");return}
-  busy=true;$("go").disabled=true;$("go").textContent="Запускаю…";$("pbar").hidden=false;$("ptxt").hidden=false;$("ptxt").textContent="Подготовка…";
+  var rel=function(){};busy=true;$("go").disabled=true;$("go").textContent="Запускаю…";$("pbar").hidden=false;$("ptxt").hidden=false;$("ptxt").textContent="Подготовка…";
   try{
     try{await vid.play();vid.pause()}catch(e){}
+    rel=await awake();
     if($("sOn").checked&&$("auto").checked&&(!$("subs").value.trim()||autoFilled)){
       if(!clips.every(function(c){return c.asr}))await asrCore();
       $("subs").value=mapSegs();autoFilled=true}
@@ -340,14 +365,14 @@ $("go").addEventListener("click",async function(){
     cv.width=d[0];cv.height=d[1];
     var stream=cv.captureStream(30);
     if(!$("mute").checked){
-      try{if(!ac){ac=new(window.AudioContext||window.webkitAudioContext)();var src=ac.createMediaElementSource(vid);dest=ac.createMediaStreamDestination();src.connect(dest)}
+      try{graph();
         await ac.resume();dest.stream.getAudioTracks().forEach(function(t){stream.addTrack(t)})}catch(e){}}
     var chunks=[],rec=new MediaRecorder(stream,{mimeType:mt,videoBitsPerSecond:4000000});
     rec.ondataavailable=function(e){if(e.data&&e.data.size)chunks.push(e.data)};
     var stopped=new Promise(function(r){rec.onstop=r});
     rec.start(500);
     $("ptxt").textContent="Монтаж идёт. Не закрывай и не сворачивай эту страницу.";
-    var off=0;
+    var off=0,lastPc=0;
     for(var n=0;n<clips.length;n++){
       var g=segs[n];
       if(n>0)await loadClip(clips[n]);
@@ -359,7 +384,7 @@ $("go").addEventListener("click",async function(){
         if(t>g[0]+0.05)moved=true;
         if(t>=g[1]||vid.ended||vid.paused||(!moved&&Date.now()-t0>8000)){done();return}
         var to=off+(t-g[0])/spd;frame(to,lines);
-        var pc=Math.min(100,Math.round(to/total*100));$("pf").style.width=pc+"%";$("go").textContent="Монтирую… "+pc+"%";
+        var pc=Math.max(lastPc,Math.min(100,Math.round(to/total*100)));lastPc=pc;$("pf").style.width=pc+"%";$("go").textContent="Монтирую… "+pc+"%";
         requestAnimationFrame(loop)})()});
       vid.pause();
       if(!moved)throw new Error("видео "+(n+1)+" не запустилось. Попробуй другой файл или браузер Chrome");
@@ -371,7 +396,7 @@ $("go").addEventListener("click",async function(){
     r.innerHTML='<strong>Готово</strong><video controls playsinline src="'+url+'"></video><a href="'+url+'" download="montage.'+ext+'">Скачать видео ('+ext.toUpperCase()+')</a><p class="hint">На iPhone, если видео не скачалось: открой его и нажми «Поделиться» → «Сохранить видео». Осталось видео: '+left+' из '+LIMIT+'.</p>';
     r.hidden=false;r.scrollIntoView({behavior:"smooth",block:"nearest"});
   }catch(e){err("Монтаж не получился: "+(e&&e.message?e.message:"неизвестная ошибка")+". Отправь этот текст Claude.")}
-  busy=false;$("go").disabled=false;$("go").textContent="Смонтировать";$("pbar").hidden=true;$("ptxt").hidden=true;$("pf").style.width="0";
+  rel();busy=false;$("go").disabled=false;$("go").textContent="Смонтировать";$("pbar").hidden=true;$("ptxt").hidden=true;$("pf").style.width="0";
   try{await loadClip(clips[0])}catch(e){}
   redraw();
 });
